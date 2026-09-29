@@ -1,0 +1,134 @@
+"use client";
+import { useMemo } from "react";
+import { Map as MapGL } from "react-map-gl/maplibre";
+import {
+  DeckGL, PolygonLayer, HeatmapLayer, IconLayer, LineLayer, ScatterplotLayer, TextLayer, TripsLayer,
+} from "deck.gl";
+import { HEAT_RANGE, riskColor } from "@/lib/colors";
+import { bearingDeg, metricValue, METRICS, targetIndex } from "@/lib/metrics";
+import { TRAIL_TIMESTAMPS, useWindParticles, type Trail } from "@/hooks/useWindParticles";
+import type { AppConfig, JoinedCell, LayerToggles, MetricKey, Storm } from "@/lib/types";
+
+const STYLE_DARK = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+const STYLE_LIGHT = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json";
+
+const ARROW_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><polygon points="32,4 52,36 38,36 38,60 26,60 26,36 12,36" fill="white"/></svg>';
+const ARROW_ICON = {
+  url: `data:image/svg+xml;utf8,${encodeURIComponent(ARROW_SVG)}`,
+  width: 64, height: 64, anchorY: 32, mask: true,
+};
+
+interface Props {
+  config: AppConfig;
+  cells: JoinedCell[];
+  storms: Storm[];
+  tick: number;
+  horizon: number;
+  metric: MetricKey;
+  layers: LayerToggles;
+  dark: boolean;
+  selected: number | null;
+  onSelect: (i: number | null) => void;
+}
+
+export default function MapViewer(p: Props) {
+  const { config, cells, storms, tick, horizon, metric, layers, dark, selected } = p;
+  const trails = useWindParticles(cells, config, layers.particles);
+
+  const initialViewState = useMemo(() => {
+    const [a, b, c, d] = config.bbox;
+    return { longitude: (a + c) / 2, latitude: (b + d) / 2, zoom: 7.5, pitch: 0, bearing: 0 };
+  }, [config]);
+
+  const val = (c: JoinedCell) => metricValue(c, metric, config);
+  const hot = useMemo(() => cells.filter((c) => c.r >= 0.3), [cells]);
+
+  const drift = (c: JoinedCell): [number, number] => {
+    const dt = horizon * 60;
+    return [
+      c.centroid[0] + (c.w[0] * dt) / (111320 * Math.cos((c.centroid[1] * Math.PI) / 180)),
+      c.centroid[1] + (c.w[1] * dt) / 111320,
+    ];
+  };
+
+  const layerList = [
+    layers.heat && new HeatmapLayer<JoinedCell>({
+      id: "heat", data: cells, getPosition: (c) => c.centroid, getWeight: (c) => (val(c) > 0.08 ? val(c) : 0),
+      radiusPixels: 55, intensity: 1.6, threshold: 0.04, colorRange: HEAT_RANGE, opacity: 0.8,
+      updateTriggers: { getWeight: [metric, tick] },
+    }),
+    layers.hex && new PolygonLayer<JoinedCell>({
+      id: "hex", data: cells, getPolygon: (c) => c.polygon, getFillColor: (c) => riskColor(val(c)),
+      stroked: true, getLineColor: [255, 255, 255, 22], lineWidthMinPixels: 0.5, pickable: true,
+      autoHighlight: true, highlightColor: [255, 255, 255, 80],
+      updateTriggers: { getFillColor: [metric, tick] },
+      onClick: (info) => p.onSelect(info.object ? (info.object as JoinedCell).i : null),
+    }),
+    selected !== null && new PolygonLayer<JoinedCell>({
+      id: "selected", data: [cells[selected]], getPolygon: (c) => c.polygon, filled: false,
+      stroked: true, getLineColor: [255, 255, 255, 255], lineWidthMinPixels: 3,
+    }),
+    layers.particles && new TripsLayer<Trail>({
+      id: "wind", data: trails, getPath: (d) => d.path, getTimestamps: () => TRAIL_TIMESTAMPS,
+      getColor: (d) => (d.speed > 16 ? [255, 120, 90] : d.speed > 11 ? [255, 210, 140] : [190, 225, 255]),
+      currentTime: TRAIL_TIMESTAMPS.length - 1, trailLength: TRAIL_TIMESTAMPS.length - 1, fadeTrail: true,
+      widthMinPixels: 1.6, capRounded: true, jointRounded: true, opacity: 0.8,
+    }),
+    layers.arrows && horizon > 0 && new LineLayer<JoinedCell>({
+      id: "drift", data: hot.filter((c) => c.r >= 0.5), getSourcePosition: (c) => c.centroid,
+      getTargetPosition: drift, getColor: [255, 255, 255, 150], getWidth: 1.5, widthUnits: "pixels",
+      updateTriggers: { getTargetPosition: [horizon, tick] },
+    }),
+    layers.arrows && new IconLayer<JoinedCell>({
+      id: "arrows", data: hot, getPosition: (c) => c.centroid, getIcon: () => ARROW_ICON,
+      getAngle: (c) => -bearingDeg(c.w[0], c.w[1]), getSize: (c) => 14 + 24 * c.r, sizeUnits: "pixels",
+      getColor: [255, 255, 255, 215], updateTriggers: { getAngle: [tick], getSize: [tick] },
+    }),
+    layers.storms && new ScatterplotLayer<Storm>({
+      id: "storms", data: storms, getPosition: (s) => [s.lon, s.lat], getRadius: (s) => s.radius_km * 1000,
+      filled: false, stroked: true, getLineColor: [255, 255, 255, 230], lineWidthMinPixels: 2,
+    }),
+    layers.storms && new TextLayer<Storm>({
+      id: "storm-labels", data: storms, getPosition: (s) => [s.lon, s.lat],
+      getText: (s) => `#${s.id} · ${Math.round(s.speed_kmh)} km/h`,
+      getSize: 12, getColor: [255, 255, 255, 255], getPixelOffset: [0, -16],
+      background: true, getBackgroundColor: [15, 23, 42, 200], backgroundPadding: [4, 2],
+    }),
+    layers.places && new ScatterplotLayer({
+      id: "places", data: config.places, getPosition: (d: any) => [d.lon, d.lat], getRadius: 4,
+      radiusUnits: "pixels", getFillColor: [255, 255, 255, 255], getLineColor: [15, 23, 42, 255],
+      stroked: true, lineWidthMinPixels: 1.5,
+    }),
+    layers.places && new TextLayer({
+      id: "place-labels", data: config.places, getPosition: (d: any) => [d.lon, d.lat], getText: (d: any) => d.name,
+      getSize: 12, getColor: dark ? [226, 232, 240, 255] : [15, 23, 42, 255], getPixelOffset: [0, 14],
+      outlineWidth: 3, outlineColor: dark ? [11, 18, 32, 255] : [255, 255, 255, 255], fontSettings: { sdf: true },
+    }),
+  ].filter(Boolean);
+
+  const metricLabel = METRICS.find((m) => m.key === metric)!.label;
+
+  return (
+    <DeckGL
+      initialViewState={initialViewState}
+      controller
+      layers={layerList as any}
+      getTooltip={({ object, layer }: any) => {
+        if (!object || layer?.id !== "hex") return null;
+        const c = object as JoinedCell;
+        const rows = config.targets
+          .map((t, i) => `${t.label}: <b>${c.t[i].toFixed(0)}</b> ${t.unit}`)
+          .join("<br/>");
+        return {
+          html: `<div class="deck-tooltip"><b>${metricLabel}: ${(val(c) * 100).toFixed(0)}%</b><br/>${rows}<br/>Click for details</div>`,
+          style: { background: "rgba(15,23,42,.94)", color: "#e2e8f0", fontSize: "12px", borderRadius: "8px", padding: "8px 10px" },
+        };
+      }}
+    >
+      <MapGL mapStyle={dark ? STYLE_DARK : STYLE_LIGHT} reuseMaps />
+    </DeckGL>
+  );
+}
+
+export { targetIndex };

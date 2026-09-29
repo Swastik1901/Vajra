@@ -1,0 +1,10 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+numpy>=1.26
+h3>=4.0.0
+pydantic>=2.6
+pytest>=8.0
+httpx>=0.27
+# Optional drop-in model runtimes (see README "Plug in a real model"):
+# onnxruntime>=1.17
+# torch>=2.2
