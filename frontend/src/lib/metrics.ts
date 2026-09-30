@@ -40,3 +40,6 @@ export function fmtMinutes(m: number) {
   const h = Math.floor(m / 60), r = Math.round(m % 60);
   return h ? `${h} h ${r} min` : `${r} min`;
 }
+
+export const placeLabel = (n: { name: string; distance_km: number; bearing: string }) =>
+  n.distance_km < 5 ? `In ${n.name}` : `${Math.round(n.distance_km)} km ${n.bearing} of ${n.name}`;

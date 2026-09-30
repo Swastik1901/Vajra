@@ -1,6 +1,6 @@
 "use client";
 import { METRICS, fmtMinutes } from "@/lib/metrics";
-import type { AppConfig, Frame, LayerToggles, MetricKey } from "@/lib/types";
+import type { AppConfig, ColorMode, Frame, LayerToggles, MetricKey } from "@/lib/types";
 import type { StreamStatus } from "@/hooks/useNowcastStream";
 
 interface Props {
@@ -9,6 +9,8 @@ interface Props {
   horizon: number; setHorizon: (h: number) => void;
   layers: LayerToggles; setLayers: (l: LayerToggles) => void;
   dark: boolean; setDark: (d: boolean) => void;
+  colorMode: ColorMode; setColorMode: (m: ColorMode) => void;
+  onLocate: () => void; busy: boolean;
 }
 
 const LAYER_LABELS: [keyof LayerToggles, string][] = [
@@ -20,7 +22,7 @@ export default function ControlPanel(p: Props) {
   const { config, frame, status } = p;
   const dot = status === "live" ? "bg-emerald-400" : status === "connecting" ? "bg-amber-400" : "bg-red-500";
   return (
-    <div className="rounded-xl bg-slate-900/85 backdrop-blur border border-white/10 p-4 w-72 text-sm space-y-4">
+    <div className="rounded-xl bg-slate-900/85 backdrop-blur border border-white/10 p-4 w-72 text-sm space-y-4 max-h-[calc(100vh-1.5rem)] overflow-auto">
       <div>
         <div className="flex items-center gap-2">
           <span className={`h-2 w-2 rounded-full ${dot}`} />
@@ -30,6 +32,18 @@ export default function ControlPanel(p: Props) {
           {status === "live" && frame ? `Live · ${new Date(frame.sim_time).toUTCString().slice(17, 25)} UTC (simulated)` :
             status === "connecting" ? "Connecting to the API…" : "Disconnected. Retrying…"}
         </div>
+      </div>
+
+      <div>
+        <div className="text-xs text-slate-400">Showing</div>
+        <div className="text-slate-100">{config.region_name}</div>
+        <button onClick={p.onLocate} disabled={p.busy}
+          className="mt-2 w-full rounded-lg border border-white/15 px-3 py-1.5 text-xs text-slate-100 hover:bg-white/10 disabled:opacity-50 focus:outline-none focus-visible:ring-2 ring-orange-400">
+          {p.busy ? "Loading…" : "Use my location"}
+        </button>
+        <p className="mt-2 text-[11px] leading-snug text-slate-500">
+          Click anywhere on the map for that spot's risk and 6-hour outlook. Click outside the current area (within India) to load a new region.
+        </p>
       </div>
 
       {frame && (
@@ -68,6 +82,19 @@ export default function ControlPanel(p: Props) {
               className={`rounded-full px-2.5 py-1 text-xs border focus:outline-none focus-visible:ring-2 ring-orange-400 ${
                 p.metric === m.key ? "bg-orange-500 border-orange-400 text-slate-950" : "border-white/15 text-slate-300 hover:bg-white/10"}`}>
               {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-1 text-xs text-slate-300">Map colours</div>
+        <div className="flex rounded-lg border border-white/15 p-0.5 text-xs" role="group" aria-label="Map colour mode">
+          {([["zones", "Warning zones"], ["gradient", "Smooth gradient"]] as const).map(([k, label]) => (
+            <button key={k} onClick={() => p.setColorMode(k)} aria-pressed={p.colorMode === k}
+              className={`flex-1 rounded-md px-2 py-1 focus:outline-none focus-visible:ring-2 ring-orange-400 ${
+                p.colorMode === k ? "bg-white/15 text-slate-100" : "text-slate-400 hover:text-slate-200"}`}>
+              {label}
             </button>
           ))}
         </div>

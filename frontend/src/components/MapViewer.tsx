@@ -2,12 +2,12 @@
 import { useMemo } from "react";
 import { Map as MapGL } from "react-map-gl/maplibre";
 import {
-  DeckGL, PolygonLayer, HeatmapLayer, IconLayer, LineLayer, ScatterplotLayer, TextLayer, TripsLayer,
+  DeckGL, PolygonLayer, HeatmapLayer, IconLayer, LineLayer, ScatterplotLayer, TextLayer, TripsLayer, FlyToInterpolator,
 } from "deck.gl";
-import { HEAT_RANGE, riskColor } from "@/lib/colors";
+import { HEAT_RANGE, riskColor, zoneColor } from "@/lib/colors";
 import { bearingDeg, metricValue, METRICS, targetIndex } from "@/lib/metrics";
 import { TRAIL_TIMESTAMPS, useWindParticles, type Trail } from "@/hooks/useWindParticles";
-import type { AppConfig, JoinedCell, LayerToggles, MetricKey, Storm } from "@/lib/types";
+import type { AppConfig, ColorMode, JoinedCell, LayerToggles, MetricKey, Storm, ViewTarget } from "@/lib/types";
 
 const STYLE_DARK = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 const STYLE_LIGHT = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json";
@@ -30,16 +30,23 @@ interface Props {
   dark: boolean;
   selected: number | null;
   onSelect: (i: number | null) => void;
+  colorMode: ColorMode;
+  selectedStorm: number | null;
+  onSelectStorm: (id: number | null) => void;
+  viewTarget: ViewTarget;
+  pin: { lat: number; lon: number } | null;
+  onPick: (lat: number, lon: number) => void;
 }
 
 export default function MapViewer(p: Props) {
-  const { config, cells, storms, tick, horizon, metric, layers, dark, selected } = p;
+  const { config, cells, storms, tick, horizon, metric, layers, dark, selected, colorMode, selectedStorm, pin, viewTarget } = p;
   const trails = useWindParticles(cells, config, layers.particles);
 
-  const initialViewState = useMemo(() => {
-    const [a, b, c, d] = config.bbox;
-    return { longitude: (a + c) / 2, latitude: (b + d) / 2, zoom: 7.5, pitch: 0, bearing: 0 };
-  }, [config]);
+  // changing viewTarget (region switch, "my location") makes deck.gl fly there
+  const initialViewState = useMemo(() => ({
+    longitude: viewTarget.lon, latitude: viewTarget.lat, zoom: viewTarget.zoom, pitch: 0, bearing: 0,
+    transitionDuration: 1400, transitionInterpolator: new FlyToInterpolator(), nonce: viewTarget.nonce,
+  }), [viewTarget]);
 
   const val = (c: JoinedCell) => metricValue(c, metric, config);
   const hot = useMemo(() => cells.filter((c) => c.r >= 0.3), [cells]);
@@ -59,13 +66,12 @@ export default function MapViewer(p: Props) {
       updateTriggers: { getWeight: [metric, tick] },
     }),
     layers.hex && new PolygonLayer<JoinedCell>({
-      id: "hex", data: cells, getPolygon: (c) => c.polygon, getFillColor: (c) => riskColor(val(c)),
+      id: "hex", data: cells, getPolygon: (c) => c.polygon, getFillColor: (c) => (colorMode === "zones" ? zoneColor(val(c), config.zones) : riskColor(val(c))),
       stroked: true, getLineColor: [255, 255, 255, 22], lineWidthMinPixels: 0.5, pickable: true,
       autoHighlight: true, highlightColor: [255, 255, 255, 80],
-      updateTriggers: { getFillColor: [metric, tick] },
-      onClick: (info) => p.onSelect(info.object ? (info.object as JoinedCell).i : null),
+      updateTriggers: { getFillColor: [metric, tick, colorMode] },
     }),
-    selected !== null && new PolygonLayer<JoinedCell>({
+    selected !== null && cells[selected] && new PolygonLayer<JoinedCell>({
       id: "selected", data: [cells[selected]], getPolygon: (c) => c.polygon, filled: false,
       stroked: true, getLineColor: [255, 255, 255, 255], lineWidthMinPixels: 3,
     }),
@@ -87,7 +93,10 @@ export default function MapViewer(p: Props) {
     }),
     layers.storms && new ScatterplotLayer<Storm>({
       id: "storms", data: storms, getPosition: (s) => [s.lon, s.lat], getRadius: (s) => s.radius_km * 1000,
-      filled: false, stroked: true, getLineColor: [255, 255, 255, 230], lineWidthMinPixels: 2,
+      filled: false, stroked: true, pickable: true,
+      getLineColor: (s) => zoneColor(s.risk, config.zones, 255),
+      getLineWidth: (s) => (s.id === selectedStorm ? 5 : 2.5), lineWidthUnits: "pixels",
+      updateTriggers: { getLineColor: [tick], getLineWidth: [selectedStorm] },
     }),
     layers.storms && new TextLayer<Storm>({
       id: "storm-labels", data: storms, getPosition: (s) => [s.lon, s.lat],
@@ -105,6 +114,10 @@ export default function MapViewer(p: Props) {
       getSize: 12, getColor: dark ? [226, 232, 240, 255] : [15, 23, 42, 255], getPixelOffset: [0, 14],
       outlineWidth: 3, outlineColor: dark ? [11, 18, 32, 255] : [255, 255, 255, 255], fontSettings: { sdf: true },
     }),
+    pin && new ScatterplotLayer({
+      id: "pin", data: [pin], getPosition: (d: any) => [d.lon, d.lat], getRadius: 9, radiusUnits: "pixels",
+      getFillColor: [255, 255, 255, 255], stroked: true, getLineColor: [15, 23, 42, 255], lineWidthMinPixels: 3,
+    }),
   ].filter(Boolean);
 
   const metricLabel = METRICS.find((m) => m.key === metric)!.label;
@@ -113,6 +126,10 @@ export default function MapViewer(p: Props) {
     <DeckGL
       initialViewState={initialViewState}
       controller
+      onClick={(info: any) => {
+        if (info.layer?.id === "storms" && info.object) p.onSelectStorm((info.object as Storm).id);
+        if (info.coordinate) p.onPick(info.coordinate[1], info.coordinate[0]);
+      }}
       layers={layerList as any}
       getTooltip={({ object, layer }: any) => {
         if (!object || layer?.id !== "hex") return null;

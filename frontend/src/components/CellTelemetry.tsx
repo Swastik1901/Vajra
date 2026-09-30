@@ -1,11 +1,18 @@
 "use client";
 import { compass, bearingDeg, FEATURE_META } from "@/lib/metrics";
 import { css, riskColor } from "@/lib/colors";
-import type { AppConfig, Frame, JoinedCell } from "@/lib/types";
+import { useCellExplain } from "@/hooks/useCellExplain";
+import WhyList from "./WhyList";
+import RegionSummary from "./RegionSummary";
+import { zoneColor, zoneOf } from "@/lib/colors";
+import { placeLabel } from "@/lib/metrics";
+import type { AppConfig, Frame, JoinedCell, PointInfo } from "@/lib/types";
 
 export default function CellTelemetry({
-  cell, config, frame, onClose,
-}: { cell: JoinedCell; config: AppConfig; frame: Frame; onClose: () => void }) {
+  cell, config, frame, point, onClose,
+}: { cell: JoinedCell; config: AppConfig; frame: Frame; point?: PointInfo | null; onClose: () => void }) {
+  const why = useCellExplain(cell.i, frame.tick);
+  const zone = config.zones[zoneOf(cell.r, config.zones)];
   const speed = Math.hypot(cell.w[0], cell.w[1]);
   const dir = bearingDeg(cell.w[0], cell.w[1]);
   return (
@@ -13,19 +20,26 @@ export default function CellTelemetry({
       className="w-80 max-h-[80vh] overflow-auto rounded-xl bg-slate-900/95 backdrop-blur border border-white/15 p-4 text-sm shadow-2xl">
       <div className="flex items-start justify-between">
         <div>
-          <div className="font-medium text-slate-100">Cell {cell.id}</div>
+          <div className="font-medium text-slate-100">{point ? placeLabel(point.nearest) : `Cell ${cell.id}`}</div>
           <div className="text-[11px] text-slate-400">
-            {cell.centroid[1].toFixed(3)}°N, {cell.centroid[0].toFixed(3)}°E · chunk {cell.chunk}
+            {(point?.lat ?? cell.centroid[1]).toFixed(3)}°N, {(point?.lon ?? cell.centroid[0]).toFixed(3)}°E · cell {cell.id}
           </div>
         </div>
         <button onClick={onClose} className="rounded px-2 py-0.5 text-slate-300 hover:bg-white/10 focus:outline-none focus-visible:ring-2 ring-orange-400">Close</button>
       </div>
 
+      {point && <RegionSummary point={point} config={config} />}
+
       <div className="mt-3 flex items-center gap-2">
-        <span className="h-3 w-3 rounded-full" style={{ background: css(riskColor(cell.r)) }} />
-        <span className="text-slate-100">Combined risk {(cell.r * 100).toFixed(0)}%</span>
+        <span className="h-3 w-3 rounded-full" style={{ background: css(zoneColor(cell.r, config.zones, 255)) }} />
+        <span className="text-slate-100">{zone.label} · risk {(cell.r * 100).toFixed(0)}%</span>
         <span className="text-slate-400 text-xs">{frame.horizon > 0 ? `forecast +${frame.horizon} min` : "now"}</span>
       </div>
+
+      <div className="mt-1 text-xs text-slate-400">{zone.advice}</div>
+
+      <h3 className="mt-4 mb-1 text-xs text-slate-400">Why is risk changing here</h3>
+      <WhyList why={why} zones={config.zones} />
 
       <h3 className="mt-4 mb-1 text-xs text-slate-400">Model output</h3>
       {config.targets.map((t, i) => {

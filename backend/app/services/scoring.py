@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..core.config import TARGETS
+from ..core.config import TARGETS, ZONES
 
 _LO = np.array([t["lo"] for t in TARGETS])
 _HI = np.array([t["hi"] for t in TARGETS])
+_ZONE_MIN = np.array([z["min"] for z in ZONES])
 
 
 def normalize_targets(y: np.ndarray) -> np.ndarray:
@@ -19,3 +20,8 @@ def composite_risk(y: np.ndarray) -> np.ndarray:
 
 def dominant_hazard(y_row: np.ndarray) -> str:
     return TARGETS[int(np.argmax(normalize_targets(y_row[None, :])[0]))]["key"]
+
+
+def zone_index(risk: np.ndarray) -> np.ndarray:
+    """0..len(ZONES)-1 warning-zone index for each risk value."""
+    return np.clip(np.searchsorted(_ZONE_MIN, risk, side="right") - 1, 0, len(ZONES) - 1)

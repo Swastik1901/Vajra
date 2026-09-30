@@ -1,3 +1,5 @@
+import type { ZoneSpec } from "./types";
+
 export type RGBA = [number, number, number, number];
 
 // white/blue (low) -> yellow -> orange -> red -> magenta (extreme)
@@ -28,3 +30,18 @@ export const HEAT_RANGE: [number, number, number, number][] = [
 ];
 
 export const css = (c: RGBA) => `rgba(${c[0]},${c[1]},${c[2]},${(c[3] / 255).toFixed(2)})`;
+
+// ---- categorical warning zones (Blue / Green / Yellow / Orange / Red / Purple) ----
+const ZONE_ALPHA = [55, 105, 150, 185, 215, 235];
+
+export function zoneOf(v: number, zones: ZoneSpec[]): number {
+  let z = 0;
+  for (let i = 0; i < zones.length; i++) if (v >= zones[i].min) z = i;
+  return z;
+}
+
+export function zoneColor(v: number, zones: ZoneSpec[], alpha?: number): RGBA {
+  const i = zoneOf(v, zones);
+  const [r, g, b] = zones[i].color;
+  return [r, g, b, alpha ?? ZONE_ALPHA[i] ?? 200];
+}

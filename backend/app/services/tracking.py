@@ -5,7 +5,6 @@ import math
 
 import numpy as np
 
-from ..core.config import PLACES, TARGETS
 from ..fusion.grid import HexGrid
 from .scoring import dominant_hazard
 
@@ -47,6 +46,7 @@ def detect_storms(grid: HexGrid, risk: np.ndarray, y: np.ndarray, u: np.ndarray,
             "bearing_deg": (math.degrees(math.atan2(uu, vv)) + 360) % 360,
             "hazard": dominant_hazard(y[peak]),
             "n_cells": len(m),
+            "members": m,
         })
     return out
 
@@ -79,13 +79,13 @@ class StormTracker:
         return dets
 
 
-def compute_etas(storms: list[dict], max_minutes: float = 360.0) -> list[dict]:
+def compute_etas(storms: list[dict], places: list[dict], max_minutes: float = 360.0) -> list[dict]:
     """Earliest arrival of each storm's (advecting) footprint at each place."""
     best: dict[str, dict] = {}
     for st in storms:
         sp = math.hypot(st["u"], st["v"])
         coslat = math.cos(math.radians(st["lat"]))
-        for p in PLACES:
+        for p in places:
             dx = (p["lon"] - st["lon"]) * KM_PER_DEG * coslat
             dy = (p["lat"] - st["lat"]) * KM_PER_DEG
             eta = None

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from ..core.cities import in_india
 from ..core.config import FEATURES
 
 router = APIRouter(prefix="/api")
@@ -27,6 +30,37 @@ def config(request: Request):
 def grid(request: Request):
     """Static hex geometry. Fetched once; per-tick frames only carry values (keeps payloads small)."""
     return _engine(request).grid_geojson
+
+
+@router.get("/point")
+def point(request: Request, lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-180, le=180)):
+    """Click-a-spot summary: nearest city, risk now, 6-hour outlook, storm arrival at that point."""
+    return _engine(request).point_info(lat, lon)
+
+
+class RegionRequest(BaseModel):
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
+
+
+@router.post("/region")
+async def set_region(body: RegionRequest, request: Request):
+    """Re-centre the monitored box on a clicked spot (India only). Shared by all connected viewers."""
+    if not in_india(body.lat, body.lon):
+        raise HTTPException(422, "That spot is outside India coverage.")
+    e = _engine(request)
+    await asyncio.to_thread(e.switch_region, body.lat, body.lon)
+    e.broadcast()
+    return e.config_payload()
+
+
+@router.get("/explain/cell/{i}")
+def explain_cell(i: int, request: Request):
+    """Drivers of the recent risk change for one cell (reflectivity, lightning, cloud-top, wind)."""
+    e = _engine(request)
+    if not 0 <= i < e.grid.n:
+        raise HTTPException(404, "cell index out of range")
+    return e.explain_cell(i)
 
 
 @router.get("/snapshot")

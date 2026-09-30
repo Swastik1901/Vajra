@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { css, zoneColor } from "@/lib/colors";
 import type { AppConfig, Frame } from "@/lib/types";
 
 const HAZARD: Record<string, string> = {
@@ -35,7 +36,7 @@ export default function ETACountdown({ frame, config }: { frame: Frame; config: 
             return (
               <li key={e.place} className="flex items-center justify-between gap-2">
                 <div>
-                  <div className="text-slate-100">{e.place}</div>
+                  <div className="text-slate-100 flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: css(zoneColor(e.risk, config.zones, 255)) }} />{e.place}</div>
                   <div className="text-[11px] text-slate-400">{HAZARD[e.hazard] ?? e.hazard} · storm #{e.storm_id}</div>
                 </div>
                 <div className={`tabular-nums font-medium ${remaining <= 900 ? "text-red-400" : remaining <= 3600 ? "text-orange-300" : "text-slate-200"}`}>

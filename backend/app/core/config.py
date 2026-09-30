@@ -19,20 +19,23 @@ FEATURES: list[str] = [
 
 # ---- Model output schema (4 targets) ; lo/hi normalise each into 0..1 for the composite risk ----
 TARGETS: list[dict] = [
-    {"key": "lightning",  "label": "Lightning strike density", "unit": "strikes/km²/hr", "lo": 0.0,  "hi": 40.0},
+    {"key": "lightning",  "label": "Lightning strike density", "unit": "strikes/km²/hr", "lo": 0.0,  "hi": 70.0},
     {"key": "hail",       "label": "Hail probability",         "unit": "%",              "lo": 0.0,  "hi": 100.0},
-    {"key": "downburst",  "label": "Downburst gust",           "unit": "km/h",           "lo": 40.0, "hi": 120.0},
+    {"key": "downburst",  "label": "Downburst gust",           "unit": "km/h",           "lo": 40.0, "hi": 150.0},
     {"key": "cloudburst", "label": "Cloudburst risk",          "unit": "%",              "lo": 0.0,  "hi": 100.0},
 ]
 
-PLACES: list[dict] = [
-    {"name": "Kolkata",      "lat": 22.5726, "lon": 88.3639},
-    {"name": "Barasat",      "lat": 22.7200, "lon": 88.4800},
-    {"name": "Krishnanagar", "lat": 23.4000, "lon": 88.4900},
-    {"name": "Bardhaman",    "lat": 23.2324, "lon": 87.8615},
-    {"name": "Durgapur",     "lat": 23.5204, "lon": 87.3119},
-    {"name": "Kharagpur",    "lat": 22.3460, "lon": 87.2320},
-    {"name": "Haldia",       "lat": 22.0667, "lon": 88.0698},
+# Size of the box loaded when the user clicks a new region (degrees lon x lat)
+REGION_SPAN = (2.6, 2.0)
+
+# Warning zones on the 0..1 combined-risk scale. `min` = lower bound of the zone (ascending).
+ZONES: list[dict] = [
+    {"key": "low",        "label": "Blue · Low",        "color": [59, 130, 246], "min": 0.00, "advice": "No significant convection"},
+    {"key": "developing", "label": "Green · Developing", "color": [34, 197, 94],  "min": 0.15, "advice": "Isolated cells forming; monitor"},
+    {"key": "watch",      "label": "Yellow · Watch",     "color": [250, 204, 21], "min": 0.30, "advice": "Thunderstorms possible; be alert"},
+    {"key": "warning",    "label": "Orange · Warning",   "color": [249, 115, 22], "min": 0.50, "advice": "Intense cell; lightning, heavy rain. Stay indoors"},
+    {"key": "severe",     "label": "Red · Severe",       "color": [239, 68, 68],  "min": 0.70, "advice": "Hail, damaging gusts or flash-flood risk"},
+    {"key": "extreme",    "label": "Purple · Extreme",   "color": [192, 38, 211], "min": 0.88, "advice": "Life-threatening; take shelter now"},
 ]
 
 HORIZONS_MIN = list(range(0, 361, 15))
@@ -48,6 +51,7 @@ class Settings:
     model_path: str | None
     cors_origins: list[str]
     seed: int
+    explain_lag_ticks: int
 
     @property
     def time_lapse(self) -> float:
@@ -66,6 +70,7 @@ def load_settings() -> Settings:
         model_path=os.getenv("MODEL_PATH") or None,
         cors_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(","),
         seed=int(os.getenv("SEED", "42")),
+        explain_lag_ticks=int(os.getenv("EXPLAIN_LAG_TICKS", "5")),
     )
     if s.chunk_res >= s.h3_res:
         raise ValueError("CHUNK_RES must be coarser (smaller) than H3_RES")
