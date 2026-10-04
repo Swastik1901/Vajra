@@ -4,7 +4,7 @@ End-to-end system: streaming environmental data → H3 spatial tiling → modula
 
 See **INSTALLATION.md** for setup. Short version: `uvicorn main:app --port 8000` in `backend/`, `npm install && npm run dev` in `frontend/`.
 
-## Data flow
+## Data Flow
 
 ```
  RawSource (simulator | DWR + INSAT + lightning via Kafka)
