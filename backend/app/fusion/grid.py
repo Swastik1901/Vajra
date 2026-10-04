@@ -57,15 +57,36 @@ class HexGrid:
                 k += 1
         self.nbr = nbr
 
+        # fast point -> cell raster: O(1) vectorised lookups (advection, ensembles, map clicks)
+        self._rstep = max(edge_km / 111.0 / 3.0, 0.004)
+        self._nlat = int((max_lat - min_lat) / self._rstep) + 1
+        self._nlon = int((max_lon - min_lon) / self._rstep) + 1
+        raster = np.full((self._nlat, self._nlon), -1, dtype=np.int32)
+        get = self.index.get
+        for iy in range(self._nlat):
+            la = min_lat + (iy + 0.5) * self._rstep
+            for ix in range(self._nlon):
+                raster[iy, ix] = get(h3.latlng_to_cell(la, min_lon + (ix + 0.5) * self._rstep, res), -1)
+        self._raster = raster
+
     # ------------------------------------------------------------------ helpers
     def lookup(self, lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
         """Vectorised (lat, lon) -> cell index, -1 when outside the domain."""
-        res, index = self.res, self.index
-        return np.fromiter(
-            (index.get(h3.latlng_to_cell(float(a), float(b), res), -1) if -90 <= a <= 90 else -1
-             for a, b in zip(lat, lon)),
-            dtype=np.int64, count=len(lat),
-        )
+        lat, lon = np.asarray(lat, dtype=np.float64), np.asarray(lon, dtype=np.float64)
+        iy = np.floor((lat - self.bbox[1]) / self._rstep).astype(np.int64)
+        ix = np.floor((lon - self.bbox[0]) / self._rstep).astype(np.int64)
+        ok = (iy >= 0) & (iy < self._nlat) & (ix >= 0) & (ix < self._nlon)
+        out = np.full(lat.shape, -1, dtype=np.int64)
+        out[ok] = self._raster[iy[ok], ix[ok]]
+        return out
+
+    def masked_neighbor_mean(self, a: np.ndarray, mask: np.ndarray):
+        """Mean of `a` over the 1-ring neighbours where `mask` is True. Returns (mean, count)."""
+        pa = np.append(a, 0.0)
+        pm = np.append(mask.astype(np.float64), 0.0)
+        idx = np.where(self.nbr >= 0, self.nbr, self.n)
+        cnt = pm[idx].sum(axis=1)
+        return (pa[idx] * pm[idx]).sum(axis=1) / np.maximum(cnt, 1.0), cnt
 
     def neighbor_mean(self, a: np.ndarray) -> np.ndarray:
         """Mean of the valid 1-ring neighbours per cell. `a` is (N,) or (N,K)."""

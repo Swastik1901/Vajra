@@ -32,6 +32,35 @@ def grid(request: Request):
     return _engine(request).grid_geojson
 
 
+@router.get("/sensors")
+def sensors(request: Request):
+    """Health of each observation source and a summary of how the fused inputs were obtained."""
+    return _engine(request).sensors_payload()
+
+
+class FaultRequest(BaseModel):
+    source: str
+    mode: str = Field(..., description="outage | partial | noisy")
+    duration_ticks: int = Field(30, ge=1, le=300)
+
+
+@router.post("/faults")
+def inject_fault(body: FaultRequest, request: Request):
+    """Demo/testing: break a sensor source on purpose to watch the fusion layer cope."""
+    e = _engine(request)
+    try:
+        e.inject_fault(body.source, body.mode, body.duration_ticks)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    return {"ok": True}
+
+
+@router.delete("/faults")
+def clear_faults(request: Request):
+    _engine(request).clear_faults()
+    return {"ok": True}
+
+
 @router.get("/point")
 def point(request: Request, lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-180, le=180)):
     """Click-a-spot summary: nearest city, risk now, 6-hour outlook, storm arrival at that point."""

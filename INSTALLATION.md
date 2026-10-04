@@ -65,7 +65,9 @@ If the backend is not on `localhost:8000`, copy `.env.local.example` to `.env.lo
 * White particle streaks flowing with the live wind field; arrows showing where each hot cell is heading.
 * Drag the **Forecast lead time** slider to +6 h. Risk zones slide downwind, spread, and weaken. The white lines show the drift.
 * Hover a cell for a tooltip; click it for the full telemetry panel (model outputs, raw inputs, chunk, inference time).
-* Top-right: arrival countdowns for monitored places (Kolkata, Durgapur, and others).
+* Top-right: arrival countdowns, then the **Storm digital twin** card (stage, risk history, confidence, end-of-life estimate) and the "why risk is changing" drivers.
+* Bottom-right: **Sensor reliability**. Open *Try breaking a sensor*, press *Radar outage*, and watch data quality and confidence change.
+* Left panel: the bar under *Forecast lead time* shows which forecast method dominates at that lead time.
 
 The simulation runs about 1 simulated minute per real second, so storms visibly cross the map in a few minutes.
 
@@ -79,6 +81,9 @@ The simulation runs about 1 simulated minute per real second, so storms visibly 
 | `TICK_SECONDS` | `2.0` | Real seconds between frames |
 | `SIM_MINUTES_PER_TICK` | `2.0` | Simulated minutes advanced per frame |
 | `MODEL_PATH` | unset | Path to a `.onnx` or TorchScript `.pt` file. Unset means the mock model. |
+| `FAULT_RATE` | `0.006` | Chance per sensor source per tick of a random fault (outage, blind spot, noise). `0` disables random faults. |
+| `N_MEMBERS` | `12` | Ensemble size for confidence ranges |
+| `EXPLAIN_LAG_TICKS` | `5` | Window for the "why did risk change" comparison |
 | `CORS_ORIGINS` | `http://localhost:3000,...` | Allowed browser origins |
 | `SEED` | `42` | Simulator seed |
 

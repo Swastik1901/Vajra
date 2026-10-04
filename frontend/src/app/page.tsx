@@ -6,6 +6,7 @@ import ETACountdown from "@/components/ETACountdown";
 import HazardLegend from "@/components/HazardLegend";
 import CellTelemetry from "@/components/CellTelemetry";
 import RiskDrivers from "@/components/RiskDrivers";
+import SensorHealth from "@/components/SensorHealth";
 import { useNowcastStream } from "@/hooks/useNowcastStream";
 import { API_URL, getJson } from "@/lib/api";
 import { fitView } from "@/lib/viewport";
@@ -29,7 +30,7 @@ export default function Page() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [layers, setLayers] = useState<LayerToggles>({
-    hex: true, heat: false, particles: true, arrows: true, storms: true, places: true,
+    hex: true, heat: false, particles: true, arrows: true, storms: true, places: true, tracks: true,
   });
   const switching = useRef(false);
   const { frame, status } = useNowcastStream(horizon);
@@ -150,15 +151,18 @@ export default function Page() {
           <div className="pointer-events-auto">
             <ControlPanel {...{ config, frame, status, metric, setMetric, horizon, setHorizon, layers, setLayers, dark, setDark, colorMode, setColorMode, busy }} onLocate={locate} />
           </div>
-          <div className="pointer-events-auto flex flex-col items-end gap-3 max-h-[calc(100vh-1.5rem)] overflow-auto">
+          <div className="pointer-events-auto flex flex-col items-end gap-3 max-h-[calc(100vh-17rem)] overflow-auto">
             <ETACountdown frame={frame} config={config} />
-            <RiskDrivers storms={matched ? frame.storms : []} config={config} selectedId={selectedStorm} onSelect={setSelectedStorm} />
+            <RiskDrivers storms={matched ? frame.storms : []} config={config} selectedId={selectedStorm} onSelect={setSelectedStorm} ended={frame.twins_ended} />
             {selectedCell && (
               <CellTelemetry cell={selectedCell} config={config} frame={frame} point={point} onClose={() => setPoint(null)} />
             )}
           </div>
         </div>
-        <div className="pointer-events-auto self-start"><HazardLegend metric={metric} config={config} colorMode={colorMode} cells={cells} /></div>
+        <div className="flex items-end justify-between gap-3">
+          <div className="pointer-events-auto"><HazardLegend metric={metric} config={config} colorMode={colorMode} cells={cells} /></div>
+          <div className="pointer-events-auto"><SensorHealth frame={frame} /></div>
+        </div>
       </div>
     </main>
   );

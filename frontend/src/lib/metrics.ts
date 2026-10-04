@@ -6,14 +6,19 @@ export const METRICS: { key: MetricKey; label: string }[] = [
   { key: "hail", label: "Hail" },
   { key: "downburst", label: "Downburst" },
   { key: "cloudburst", label: "Cloudburst" },
+  { key: "uncertainty", label: "Uncertainty" },
+  { key: "quality", label: "Data quality" },
 ];
 
 const TARGET_INDEX: Record<string, number> = { lightning: 0, hail: 1, downburst: 2, cloudburst: 3 };
 export const targetIndex = (k: MetricKey) => TARGET_INDEX[k];
+export const isHazardMetric = (k: MetricKey) => k in TARGET_INDEX;
 
 /** 0..1 intensity used for colouring, for the chosen metric. */
 export function metricValue(c: JoinedCell, metric: MetricKey, config: AppConfig): number {
   if (metric === "risk") return c.r;
+  if (metric === "uncertainty") return 1 - c.c;
+  if (metric === "quality") return 1 - c.q;
   const i = TARGET_INDEX[metric];
   const s = config.targets[i];
   return Math.max(0, Math.min(1, (c.t[i] - s.lo) / (s.hi - s.lo)));
@@ -43,3 +48,10 @@ export function fmtMinutes(m: number) {
 
 export const placeLabel = (n: { name: string; distance_km: number; bearing: string }) =>
   n.distance_km < 5 ? `In ${n.name}` : `${Math.round(n.distance_km)} km ${n.bearing} of ${n.name}`;
+
+export const confidenceLabel = (c: number) => (c >= 0.75 ? "High" : c >= 0.45 ? "Medium" : "Low");
+export const pct = (v: number) => Math.round(v * 100);
+export const PROVENANCE_TEXT: Record<string, string> = {
+  observed: "measured", proxy: "estimated from another sensor", persistence: "last known value",
+  "neighbour fill": "filled from neighbours", default: "typical value",
+};

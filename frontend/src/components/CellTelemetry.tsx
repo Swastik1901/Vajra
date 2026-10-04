@@ -5,7 +5,7 @@ import { useCellExplain } from "@/hooks/useCellExplain";
 import WhyList from "./WhyList";
 import RegionSummary from "./RegionSummary";
 import { zoneColor, zoneOf } from "@/lib/colors";
-import { placeLabel } from "@/lib/metrics";
+import { confidenceLabel, pct, placeLabel, PROVENANCE_TEXT } from "@/lib/metrics";
 import type { AppConfig, Frame, JoinedCell, PointInfo } from "@/lib/types";
 
 export default function CellTelemetry({
@@ -40,6 +40,25 @@ export default function CellTelemetry({
 
       <h3 className="mt-4 mb-1 text-xs text-slate-400">Why is risk changing here</h3>
       <WhyList why={why} zones={config.zones} />
+
+      <h3 className="mt-4 mb-1 text-xs text-slate-400">Confidence</h3>
+      <div className="text-xs text-slate-200">
+        Risk {pct(cell.r)}% (range {pct(cell.lo)}–{pct(cell.hi)}%), <b>{confidenceLabel(cell.c)} confidence</b>
+        <div className="text-slate-400">Chance of Warning zone or worse: {pct(cell.p)}%</div>
+      </div>
+
+      <h3 className="mt-4 mb-1 text-xs text-slate-400">Input data quality: {pct(point?.quality?.score ?? cell.q)}%</h3>
+      {point?.quality && (
+        <ul className="space-y-1 text-xs">
+          {point.quality.features.map((f) => (
+            <li key={f.name} className="flex items-center gap-2">
+              <span className="w-28 shrink-0 truncate text-slate-300">{FEATURE_META[f.name]?.label ?? f.name}</span>
+              <span className="h-1.5 flex-1 rounded bg-white/10"><span className="block h-1.5 rounded" style={{ width: `${f.reliability * 100}%`, background: css(riskColor(1 - f.reliability)) }} /></span>
+              <span className="w-24 shrink-0 text-right text-[10px] text-slate-500">{PROVENANCE_TEXT[f.source] ?? f.source}</span>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <h3 className="mt-4 mb-1 text-xs text-slate-400">Model output</h3>
       {config.targets.map((t, i) => {

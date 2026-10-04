@@ -47,6 +47,8 @@ def detect_storms(grid: HexGrid, risk: np.ndarray, y: np.ndarray, u: np.ndarray,
             "hazard": dominant_hazard(y[peak]),
             "n_cells": len(m),
             "members": m,
+            "peak_idx": int(peak),
+            "peak_targets": [float(t) for t in y[peak]],
         })
     return out
 

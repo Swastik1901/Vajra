@@ -15,8 +15,30 @@ interface Props {
 
 const LAYER_LABELS: [keyof LayerToggles, string][] = [
   ["hex", "Risk cells"], ["heat", "Heat glow"], ["particles", "Wind particles"],
-  ["arrows", "Drift arrows"], ["storms", "Storm cells"], ["places", "Places"],
+  ["arrows", "Drift arrows"], ["storms", "Storm cells"], ["places", "Places"], ["tracks", "Storm tracks"],
 ];
+
+const STRATEGY: [keyof NonNullable<Frame["strategy"]>["weights"], string, string][] = [
+  ["extrapolation", "Extrapolation", "bg-sky-400"],
+  ["lifecycle", "Storm lifecycle", "bg-violet-400"],
+  ["environment", "Environment", "bg-emerald-400"],
+];
+
+function StrategyBar({ frame }: { frame: Frame }) {
+  const w = frame.strategy.weights;
+  return (
+    <div className="mt-2" aria-label="Forecast method mix for this lead time">
+      <div className="flex h-1.5 overflow-hidden rounded-full bg-white/10">
+        {STRATEGY.map(([k, , color]) => <div key={k} className={color} style={{ width: `${w[k] * 100}%` }} />)}
+      </div>
+      <div className="mt-1 flex flex-wrap gap-x-3 text-[10px] text-slate-400">
+        {STRATEGY.map(([k, label, color]) => (
+          <span key={k} className="flex items-center gap-1"><span className={`h-1.5 w-1.5 rounded-full ${color}`} />{label} {Math.round(w[k] * 100)}%</span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function ControlPanel(p: Props) {
   const { config, frame, status } = p;
@@ -72,6 +94,7 @@ export default function ControlPanel(p: Props) {
         </div>
         <input id="horizon" type="range" min={0} max={360} step={15} value={p.horizon} className="w-full"
           onChange={(e) => p.setHorizon(Number(e.target.value))} />
+        {frame && <StrategyBar frame={frame} />}
       </div>
 
       <div>

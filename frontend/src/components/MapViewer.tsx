@@ -2,10 +2,10 @@
 import { useMemo } from "react";
 import { Map as MapGL } from "react-map-gl/maplibre";
 import {
-  DeckGL, PolygonLayer, HeatmapLayer, IconLayer, LineLayer, ScatterplotLayer, TextLayer, TripsLayer, FlyToInterpolator,
+  DeckGL, PathLayer, PolygonLayer, HeatmapLayer, IconLayer, LineLayer, ScatterplotLayer, TextLayer, TripsLayer, FlyToInterpolator,
 } from "deck.gl";
 import { HEAT_RANGE, riskColor, zoneColor } from "@/lib/colors";
-import { bearingDeg, metricValue, METRICS, targetIndex } from "@/lib/metrics";
+import { bearingDeg, isHazardMetric, metricValue, METRICS, targetIndex } from "@/lib/metrics";
 import { TRAIL_TIMESTAMPS, useWindParticles, type Trail } from "@/hooks/useWindParticles";
 import type { AppConfig, ColorMode, JoinedCell, LayerToggles, MetricKey, Storm, ViewTarget } from "@/lib/types";
 
@@ -49,6 +49,13 @@ export default function MapViewer(p: Props) {
   }), [viewTarget]);
 
   const val = (c: JoinedCell) => metricValue(c, metric, config);
+  const useZones = colorMode === "zones" && (metric === "risk" || isHazardMetric(metric));
+
+  // storm digital twins: projected positions with a widening uncertainty cone
+  const rings = useMemo(
+    () => storms.flatMap((s) => (s.twin?.track_future ?? []).filter((q) => q.m > 0).map((q) => ({ ...q, risk: s.risk, id: s.id }))),
+    [storms]);
+  const hourMarks = useMemo(() => rings.filter((q) => [60, 120, 240, 360].includes(q.m)), [rings]);
   const hot = useMemo(() => cells.filter((c) => c.r >= 0.3), [cells]);
 
   const drift = (c: JoinedCell): [number, number] => {
@@ -66,10 +73,10 @@ export default function MapViewer(p: Props) {
       updateTriggers: { getWeight: [metric, tick] },
     }),
     layers.hex && new PolygonLayer<JoinedCell>({
-      id: "hex", data: cells, getPolygon: (c) => c.polygon, getFillColor: (c) => (colorMode === "zones" ? zoneColor(val(c), config.zones) : riskColor(val(c))),
+      id: "hex", data: cells, getPolygon: (c) => c.polygon, getFillColor: (c) => (useZones ? zoneColor(val(c), config.zones) : riskColor(val(c))),
       stroked: true, getLineColor: [255, 255, 255, 22], lineWidthMinPixels: 0.5, pickable: true,
       autoHighlight: true, highlightColor: [255, 255, 255, 80],
-      updateTriggers: { getFillColor: [metric, tick, colorMode] },
+      updateTriggers: { getFillColor: [metric, tick, colorMode, useZones] },
     }),
     selected !== null && cells[selected] && new PolygonLayer<JoinedCell>({
       id: "selected", data: [cells[selected]], getPolygon: (c) => c.polygon, filled: false,
@@ -90,6 +97,25 @@ export default function MapViewer(p: Props) {
       id: "arrows", data: hot, getPosition: (c) => c.centroid, getIcon: () => ARROW_ICON,
       getAngle: (c) => -bearingDeg(c.w[0], c.w[1]), getSize: (c) => 14 + 24 * c.r, sizeUnits: "pixels",
       getColor: [255, 255, 255, 215], updateTriggers: { getAngle: [tick], getSize: [tick] },
+    }),
+    layers.tracks && new ScatterplotLayer<(typeof rings)[number]>({
+      id: "track-cone", data: rings, getPosition: (d) => [d.lon, d.lat], getRadius: (d) => d.radius_km * 1000,
+      filled: true, getFillColor: (d) => zoneColor(d.risk, config.zones, Math.max(14, 60 - d.m / 7)),
+      stroked: true, getLineColor: [255, 255, 255, 50], lineWidthMinPixels: 1,
+    }),
+    layers.tracks && new PathLayer<Storm>({
+      id: "track-future", data: storms, getPath: (s) => (s.twin?.track_future ?? []).map((q): [number, number] => [q.lon, q.lat]),
+      getColor: [255, 255, 255, 170], widthMinPixels: 2, capRounded: true, jointRounded: true,
+    }),
+    layers.tracks && new PathLayer<Storm>({
+      id: "track-past", data: storms, getPath: (s) => s.twin?.track_past ?? [],
+      getColor: (s) => zoneColor(s.risk, config.zones, 235), widthMinPixels: 3.5, capRounded: true, jointRounded: true,
+      updateTriggers: { getColor: [tick] },
+    }),
+    layers.tracks && new TextLayer<(typeof rings)[number]>({
+      id: "track-labels", data: hourMarks, getPosition: (d) => [d.lon, d.lat], getText: (d) => `+${d.m / 60}h`,
+      getSize: 11, getColor: [255, 255, 255, 230], getPixelOffset: [0, -10], fontSettings: { sdf: true },
+      outlineWidth: 3, outlineColor: [11, 18, 32, 255],
     }),
     layers.storms && new ScatterplotLayer<Storm>({
       id: "storms", data: storms, getPosition: (s) => [s.lon, s.lat], getRadius: (s) => s.radius_km * 1000,
@@ -138,7 +164,7 @@ export default function MapViewer(p: Props) {
           .map((t, i) => `${t.label}: <b>${c.t[i].toFixed(0)}</b> ${t.unit}`)
           .join("<br/>");
         return {
-          html: `<div class="deck-tooltip"><b>${metricLabel}: ${(val(c) * 100).toFixed(0)}%</b><br/>${rows}<br/>Click for details</div>`,
+          html: `<div class="deck-tooltip"><b>${metricLabel}: ${(val(c) * 100).toFixed(0)}%</b><br/>${rows}<br/>Risk ${(c.r * 100).toFixed(0)}% (${(c.lo * 100).toFixed(0)}–${(c.hi * 100).toFixed(0)}%), confidence ${(c.c * 100).toFixed(0)}%<br/>Click for details</div>`,
           style: { background: "rgba(15,23,42,.94)", color: "#e2e8f0", fontSize: "12px", borderRadius: "8px", padding: "8px 10px" },
         };
       }}

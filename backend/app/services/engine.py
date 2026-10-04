@@ -19,14 +19,18 @@ from datetime import datetime
 import numpy as np
 
 from ..core.cities import cities_in_bbox, in_india, nearest_city, region_name
-from ..core.config import FEATURES, HORIZONS_MIN, REGION_SPAN, TARGETS, ZONES, Settings
+from ..core.config import FEATURES, HORIZONS_MIN, REGION_SPAN, SOURCES, TARGETS, ZONES, Settings
 from ..fusion.grid import HexGrid
+from ..fusion.reliability import PROV_NAMES, FusionEngine, quality_from
+from ..ingestion.sensors import SensorSuite
 from ..ingestion.simulator import StormSimulator
 from ..models.registry import load_model
-from .advection import forecast_targets
+from .ensemble import EnsStats, ensemble_stats, input_ensemble
 from .explain import explain, region_stats
+from .lead_time import blend_forecast, strategy_weights
 from .scoring import composite_risk, zone_index
 from .tracking import StormTracker, compute_etas, detect_storms
+from .twin import TwinRegistry
 
 POINT_HORIZONS = [0, 30, 60, 90, 120, 180, 240, 300, 360]
 
@@ -54,6 +58,14 @@ class TickState:
     storms: list[dict]
     etas: list[dict]
     inference_ms: float
+    rel: np.ndarray        # (N, F) reliability of each fused input
+    prov: np.ndarray       # (N, F) provenance code
+    quality: np.ndarray    # (N,) overall data quality
+    ens0: np.ndarray       # (K, N, 4) input-perturbed ensemble
+    ens_stats0: EnsStats
+    sensors: list[dict]
+    fusion: dict
+    ended: list[dict]
 
 
 def region_bbox(lat: float, lon: float) -> tuple[float, float, float, float]:
@@ -73,6 +85,7 @@ class NowcastEngine:
         self.state: TickState | None = None
         self._cache: dict[tuple[int, int], str] = {}
         self._fc: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
+        self._ec: dict[tuple[int, int], EnsStats] = {}
         self._subs: set[asyncio.Queue] = set()
         self._install_region(self._build_region(s.bbox))
 
@@ -92,6 +105,10 @@ class NowcastEngine:
         self.overlay_exp = np.zeros(n, dtype=np.int64)
         self.history: deque[TickState] = deque(maxlen=self.s.explain_lag_ticks + 1)
         self.storm_hist: dict[int, deque] = {}
+        self.sensors = SensorSuite(region.bbox, self.s.sim_minutes_per_tick, self.s.fault_rate, self.s.seed + region.id)
+        self.fusion = FusionEngine(n)
+        self.twins = TwinRegistry()
+        self._t0 = self.source.sim_time
 
     def switch_region(self, lat: float, lon: float) -> int:
         """Re-centre the monitored box on (lat, lon). Blocking; call via a thread."""
@@ -141,12 +158,18 @@ class NowcastEngine:
         self.tick_id += 1
         self.source.step(self.s.sim_minutes_per_tick)
         raw = self.source.sample(g.lat, g.lon)
-        x = np.stack([raw[k] for k in FEATURES], axis=1).astype(np.float32)
+        obs = self.sensors.observe(self.tick_id, raw, g.lat, g.lon)      # what the sensors actually deliver
+        fr = self.fusion.fuse(obs, g)                                    # gap-free values + reliability
+        x, rel, prov = fr.values.astype(np.float32), fr.reliability.copy(), fr.provenance.copy()
 
         with self._lock:
             active = self.overlay_exp >= self.tick_id
             self.overlay[~active] = np.nan
-            x = np.where(active[:, None] & ~np.isnan(self.overlay), self.overlay, x).astype(np.float32)
+            ov = active[:, None] & ~np.isnan(self.overlay)
+            x = np.where(ov, self.overlay, x).astype(np.float32)
+            rel = np.where(ov, 1.0, rel).astype(np.float32)
+            prov = np.where(ov, 0, prov).astype(np.int8)
+        quality = quality_from(rel).astype(np.float32)
 
         # chunked (hierarchical) inference -> one work unit per parent hex
         t0 = time.perf_counter()
@@ -156,10 +179,19 @@ class NowcastEngine:
             y[ch] = yp
         inference_ms = (time.perf_counter() - t0) * 1000
 
+        ens0 = input_ensemble(self.model, x, rel, self.pool, self.s.n_members, np.random.default_rng(self.tick_id))
+
         risk = composite_risk(y)
         u, v = x[:, FEATURES.index("wind_u")], x[:, FEATURES.index("wind_v")]
+        sim_min = (self.source.sim_time - self._t0).total_seconds() / 60.0
         storms = self.tracker.update(detect_storms(g, risk, y, u, v))
+        self.twins.update(storms, g, u, v, sim_min)                      # digital twins: track, stage, projected path
         etas = compute_etas(storms, region.places)
+        ens_stats0 = ensemble_stats(g, y, y, ens0, u, v, 0, self.tick_id * 1000)
+        for st_ in storms:
+            pk = st_["peak_idx"]
+            st_["lo"], st_["hi"] = float(ens_stats0.lo[pk]), float(ens_stats0.hi[pk])
+            st_["conf"], st_["p_warning"] = float(ens_stats0.conf[pk]), float(ens_stats0.p[pk])
 
         # explainability: compare each storm's footprint now vs ~lag ticks ago
         lag = self.s.explain_lag_ticks
@@ -172,9 +204,11 @@ class NowcastEngine:
         for sid in [k for k in self.storm_hist if k not in alive]:
             del self.storm_hist[sid]
 
-        state = TickState(self.tick_id, self.source.sim_time, region, x, y, risk, u, v, storms, etas, inference_ms)
+        state = TickState(self.tick_id, self.source.sim_time, region, x, y, risk, u, v, storms, etas, inference_ms,
+                          rel, prov, quality, ens0, ens_stats0, obs.health, fr.summary,
+                          self.twins.ended_payload(sim_min))
         self.history.append(state)
-        self._cache, self._fc = {}, {}
+        self._cache, self._fc, self._ec = {}, {}, {}
         self.state = state          # single atomic publish
 
     # ------------------------------------------------------------ serialisation
@@ -183,12 +217,22 @@ class NowcastEngine:
         hit = self._fc.get(key)
         if hit is not None:
             return hit
-        if horizon <= 0:
-            out = (st.targets, st.risk)
-        else:
-            y = forecast_targets(st.region.grid, st.targets, st.u, st.v, horizon)
-            out = (y, composite_risk(y))
+        y = st.targets if horizon <= 0 else blend_forecast(st.region.grid, st, horizon)
+        out = (y, st.risk if horizon <= 0 else composite_risk(y))
         self._fc[key] = out
+        return out
+
+    def _ens(self, st: TickState, horizon: int) -> EnsStats:
+        key = (st.tick, horizon)
+        hit = self._ec.get(key)
+        if hit is not None:
+            return hit
+        if horizon <= 0:
+            out = st.ens_stats0
+        else:
+            y, _ = self._forecast(st, horizon)
+            out = ensemble_stats(st.region.grid, y, st.targets, st.ens0, st.u, st.v, horizon, st.tick * 1000 + horizon)
+        self._ec[key] = out
         return out
 
     def frame_json(self, horizon: int) -> str:
@@ -200,10 +244,14 @@ class NowcastEngine:
             return hit
         g = st.region.grid
         y, risk = self._forecast(st, horizon)
+        ens = self._ens(st, horizon)
         yr, rr = np.round(y, 1).tolist(), np.round(risk, 3).tolist()
         wr = np.round(np.stack([st.u, st.v], 1), 1).tolist()
         xr = np.round(st.raw, 1).tolist()
-        cells = [{"r": r, "t": t, "w": w, "x": x} for r, t, w, x in zip(rr, yr, wr, xr)]
+        lo, hi = np.round(ens.lo, 2).tolist(), np.round(ens.hi, 2).tolist()
+        cf, pw, qq = np.round(ens.conf, 2).tolist(), np.round(ens.p, 2).tolist(), np.round(st.quality, 2).tolist()
+        cells = [{"r": r, "t": t, "w": w, "x": x, "lo": a, "hi": b, "c": c, "p": p, "q": q}
+                 for r, t, w, x, a, b, c, p, q in zip(rr, yr, wr, xr, lo, hi, cf, pw, qq)]
         payload = {
             "type": "frame",
             "tick": st.tick,
@@ -222,6 +270,10 @@ class NowcastEngine:
             },
             "storms": [self._public_storm(s) for s in st.storms],
             "etas": st.etas,
+            "strategy": {"horizon": horizon, "weights": {k: round(w, 3) for k, w in strategy_weights(horizon).items()}},
+            "sensors": st.sensors,
+            "fusion": st.fusion,
+            "twins_ended": st.ended,
             "cells": cells,
         }
         out = json.dumps(payload, separators=(",", ":"))
@@ -233,6 +285,7 @@ class NowcastEngine:
         st = self.state
         assert st is not None
         y, risk = self._forecast(st, horizon)
+        ens = self._ens(st, horizon)
         zi = zone_index(risk)
         feats = []
         for i, f in enumerate(st.region.geojson["features"]):
@@ -242,6 +295,8 @@ class NowcastEngine:
                 "properties": {
                     "id": f["properties"]["id"], "risk": round(float(risk[i]), 3),
                     "zone": ZONES[int(zi[i])]["key"],
+                    "risk_lo": round(float(ens.lo[i]), 2), "risk_hi": round(float(ens.hi[i]), 2),
+                    "confidence": round(float(ens.conf[i]), 2), "data_quality": round(float(st.quality[i]), 2),
                     **{TARGETS[k]["key"]: round(float(y[i, k]), 1) for k in range(len(TARGETS))},
                     "wind_u": round(u, 1), "wind_v": round(v, 1),
                     "wind_speed_ms": round(math.hypot(u, v), 1),
@@ -263,16 +318,31 @@ class NowcastEngine:
             "targets": TARGETS, "places": r.places, "horizons": HORIZONS_MIN,
             "tick_seconds": s.tick_seconds, "sim_minutes_per_tick": s.sim_minutes_per_tick,
             "time_lapse": s.time_lapse, "zones": ZONES, "cell_area_km2": round(g.cell_area_km2, 2),
-            "explain_lag_min": s.explain_lag_ticks * s.sim_minutes_per_tick,
+            "explain_lag_min": s.explain_lag_ticks * s.sim_minutes_per_tick, "n_members": s.n_members,
+            "sources": SOURCES,
             "model": {"name": self.model.name, "version": self.model.version},
         }
 
     @staticmethod
     def _public_storm(s: dict) -> dict:
-        out = {k: v for k, v in s.items() if k != "members"}
-        for k in ("lat", "lon", "radius_km", "risk", "u", "v", "speed_kmh", "bearing_deg"):
+        out = {k: v for k, v in s.items() if k not in ("members", "peak_idx")}
+        for k in ("lat", "lon", "radius_km", "risk", "u", "v", "speed_kmh", "bearing_deg", "lo", "hi", "conf", "p_warning"):
             out[k] = round(out[k], 3)
         return out
+
+    # ------------------------------------------------------------ sensor faults (demo / testing)
+    def inject_fault(self, source: str, mode: str, duration_ticks: int) -> None:
+        with self._rlock:
+            self.sensors.inject(source, mode, duration_ticks)
+
+    def clear_faults(self) -> None:
+        with self._rlock:
+            self.sensors.clear()
+
+    def sensors_payload(self) -> dict:
+        st = self.state
+        assert st is not None
+        return {"sources": st.sensors, "fusion": st.fusion}
 
     # ------------------------------------------------------------ click-a-point APIs
     def point_info(self, lat: float, lon: float) -> dict:
@@ -290,8 +360,17 @@ class NowcastEngine:
         if idx >= 0:
             for m in POINT_HORIZONS:
                 y, r = self._forecast(st, m)
+                e = self._ens(st, m)
                 info["forecast"].append({"minutes": m, "risk": round(float(r[idx]), 3),
+                                         "lo": round(float(e.lo[idx]), 2), "hi": round(float(e.hi[idx]), 2),
+                                         "conf": round(float(e.conf[idx]), 2), "p_warning": round(float(e.p[idx]), 2),
                                          "targets": [round(float(v), 1) for v in y[idx]]})
+            info["quality"] = {
+                "score": round(float(st.quality[idx]), 2),
+                "features": [{"name": f, "value": round(float(st.raw[idx, j]), 1),
+                              "reliability": round(float(st.rel[idx, j]), 2), "source": PROV_NAMES[int(st.prov[idx, j])]}
+                             for j, f in enumerate(FEATURES)],
+            }
             info["now"] = {**info["forecast"][0], "wind": [round(float(st.u[idx]), 1), round(float(st.v[idx]), 1)]}
             info["arrivals"] = compute_etas(st.storms, [{"name": "this point", "lat": lat, "lon": lon}])
         return info

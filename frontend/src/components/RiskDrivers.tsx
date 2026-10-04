@@ -1,6 +1,7 @@
 "use client";
 import { css, zoneColor, zoneOf } from "@/lib/colors";
-import type { AppConfig, Storm } from "@/lib/types";
+import type { AppConfig, EndedStorm, Storm } from "@/lib/types";
+import StormTwinCard from "./StormTwinCard";
 import WhyList from "./WhyList";
 
 interface Props {
@@ -8,16 +9,17 @@ interface Props {
   config: AppConfig;
   selectedId: number | null;
   onSelect: (id: number | null) => void;
+  ended: EndedStorm[];
 }
 
 /** Explains the change in the forecast for one storm: which inputs pushed the risk up or down. */
-export default function RiskDrivers({ storms, config, selectedId, onSelect }: Props) {
+export default function RiskDrivers({ storms, config, selectedId, onSelect, ended }: Props) {
   const sorted = [...storms].sort((a, b) => b.risk - a.risk);
   const storm = storms.find((s) => s.id === selectedId) ?? sorted[0];
 
   return (
     <div className="rounded-xl bg-slate-900/85 backdrop-blur border border-white/10 p-3 w-72 text-sm">
-      <h2 className="font-medium text-slate-100">Why the risk is changing</h2>
+      <h2 className="font-medium text-slate-100">Storm digital twin</h2>
       {!storm ? (
         <p className="mt-2 text-xs text-slate-400">No active storm cell right now. Zones show background risk only.</p>
       ) : (
@@ -32,9 +34,9 @@ export default function RiskDrivers({ storms, config, selectedId, onSelect }: Pr
               </button>
             ))}
           </div>
-          <div className="mt-2 mb-2 text-xs text-slate-400">
-            Storm #{storm.id} · {config.zones[zoneOf(storm.risk, config.zones)].label} · {Math.round(storm.speed_kmh)} km/h
-          </div>
+          <div className="mt-2 mb-2 text-xs text-slate-300">Storm #{storm.id}</div>
+          <StormTwinCard storm={storm} config={config} ended={ended} />
+          <h3 className="mt-3 mb-1 text-xs text-slate-400">Why the risk is changing</h3>
           <WhyList why={storm.why} zones={config.zones} />
         </>
       )}

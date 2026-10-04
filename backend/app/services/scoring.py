@@ -25,3 +25,8 @@ def dominant_hazard(y_row: np.ndarray) -> str:
 def zone_index(risk: np.ndarray) -> np.ndarray:
     """0..len(ZONES)-1 warning-zone index for each risk value."""
     return np.clip(np.searchsorted(_ZONE_MIN, risk, side="right") - 1, 0, len(ZONES) - 1)
+
+
+def composite_risk_nd(y: np.ndarray) -> np.ndarray:
+    """Composite risk for any leading shape, e.g. ensemble members (K, N, 4) -> (K, N)."""
+    return normalize_targets(y).max(axis=-1)
