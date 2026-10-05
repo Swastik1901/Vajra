@@ -151,7 +151,7 @@ export default function Page() {
           <div className="pointer-events-auto">
             <ControlPanel {...{ config, frame, status, metric, setMetric, horizon, setHorizon, layers, setLayers, dark, setDark, colorMode, setColorMode, busy }} onLocate={locate} />
           </div>
-          <div className="pointer-events-auto flex flex-col items-end gap-3 max-h-[calc(100vh-17rem)] overflow-auto">
+          <div className="pointer-events-auto absolute right-3 top-3 bottom-3 flex flex-col items-end gap-3 overflow-y-auto overflow-x-hidden [&>*]:shrink-0">
             <ETACountdown frame={frame} config={config} />
             <RiskDrivers storms={matched ? frame.storms : []} config={config} selectedId={selectedStorm} onSelect={setSelectedStorm} ended={frame.twins_ended} />
             {selectedCell && (
