@@ -80,27 +80,35 @@ class Settings:
     explain_lag_ticks: int
     fault_rate: float
     n_members: int
+    calm: bool = False
 
     @property
     def time_lapse(self) -> float:
         """Simulated seconds per wall-clock second."""
         return self.sim_minutes_per_tick * 60.0 / self.tick_seconds
 
+    @property
+    def noise_scale(self) -> float:
+        """Multiplier on the simulator's per-frame random noise (calm demo mode = almost none)."""
+        return 0.12 if self.calm else 1.0
+
 
 def load_settings() -> Settings:
     bbox = tuple(float(x) for x in os.getenv("BBOX", "87.0,21.8,89.6,23.8").split(","))
+    calm = os.getenv("CALM", "1").lower() in ("1", "true", "yes")
     s = Settings(
         bbox=bbox,  # type: ignore[arg-type]
         h3_res=int(os.getenv("H3_RES", "6")),
         chunk_res=int(os.getenv("CHUNK_RES", "4")),
-        tick_seconds=float(os.getenv("TICK_SECONDS", "2.0")),
-        sim_minutes_per_tick=float(os.getenv("SIM_MINUTES_PER_TICK", "2.0")),
+        tick_seconds=float(os.getenv("TICK_SECONDS", "6.0" if calm else "2.0")),
+        sim_minutes_per_tick=float(os.getenv("SIM_MINUTES_PER_TICK", "1.0" if calm else "2.0")),
         model_path=os.getenv("MODEL_PATH") or None,
-        cors_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(","),
+        cors_origins=[o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()],
         seed=int(os.getenv("SEED", "42")),
-        explain_lag_ticks=int(os.getenv("EXPLAIN_LAG_TICKS", "5")),
-        fault_rate=float(os.getenv("FAULT_RATE", "0.006")),
+        explain_lag_ticks=int(os.getenv("EXPLAIN_LAG_TICKS", "10" if calm else "5")),
+        fault_rate=float(os.getenv("FAULT_RATE", "0" if calm else "0.006")),
         n_members=int(os.getenv("N_MEMBERS", "12")),
+        calm=calm,
     )
     if s.chunk_res >= s.h3_res:
         raise ValueError("CHUNK_RES must be coarser (smaller) than H3_RES")

@@ -11,6 +11,7 @@ export interface Place { name: string; lat: number; lon: number }
 
 export interface AppConfig {
   bbox: [number, number, number, number];
+  calm: boolean;
   region_id: number; region_name: string;
   h3_res: number; chunk_res: number; n_cells: number; n_chunks: number;
   cell_spacing_deg: number; cell_area_km2: number;
@@ -66,7 +67,7 @@ export interface Strategy { horizon: number; weights: { extrapolation: number; l
 export interface Eta { place: string; storm_id: number; eta_min: number; hazard: string; risk: number }
 
 export interface Frame {
-  type: "frame"; tick: number; region_id: number; region_name: string; sim_time: string; horizon: number;
+  type: "frame"; tick: number; paused: boolean; calm: boolean; region_id: number; region_name: string; sim_time: string; horizon: number;
   model: { name: string; version: string };
   inference_ms: number; n_chunks: number;
   stats: { n_cells: number; high_cells: number; mean_risk: number; max: number[] };

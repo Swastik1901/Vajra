@@ -81,6 +81,7 @@ class NowcastEngine:
         self._rlock = threading.RLock()   # serialises ticks and region swaps
         self._lock = threading.Lock()     # overlay (ingest) access
         self.tick_id = 0
+        self.paused = False
         self._region_counter = 0
         self.state: TickState | None = None
         self._cache: dict[tuple[int, int], str] = {}
@@ -98,7 +99,7 @@ class NowcastEngine:
 
     def _install_region(self, region: Region) -> None:
         self.region = region
-        self.source = StormSimulator(region.bbox, seed=self.s.seed + region.id)   # <- swap for a real RawSource
+        self.source = StormSimulator(region.bbox, seed=self.s.seed + region.id, noise_scale=self.s.noise_scale)   # <- swap for a real RawSource
         self.tracker = StormTracker()
         n = region.grid.n
         self.overlay = np.full((n, len(FEATURES)), np.nan, dtype=np.float32)
@@ -147,6 +148,23 @@ class NowcastEngine:
                     applied += 1
             return applied
 
+    # ------------------------------------------------------------ calm demo + pause
+    def _ens_seed(self, tick: int, horizon: int) -> int:
+        """Calm demo: one fixed ensemble seed, so confidence ranges only move when the data moves."""
+        return (7919 if self.s.calm else tick) * 1000 + int(horizon)
+
+    def set_paused(self, paused: bool) -> None:
+        with self._rlock:
+            self.paused = paused
+            self._cache = {}          # cached frames carry the paused flag
+
+    def step_if_running(self) -> bool:
+        """One scheduled tick; does nothing while paused (the lead-time slider still works on the frozen state)."""
+        if self.paused:
+            return False
+        self.compute_tick()
+        return True
+
     # ------------------------------------------------------------ one pipeline tick
     def compute_tick(self) -> None:
         with self._rlock:
@@ -179,7 +197,7 @@ class NowcastEngine:
             y[ch] = yp
         inference_ms = (time.perf_counter() - t0) * 1000
 
-        ens0 = input_ensemble(self.model, x, rel, self.pool, self.s.n_members, np.random.default_rng(self.tick_id))
+        ens0 = input_ensemble(self.model, x, rel, self.pool, self.s.n_members, np.random.default_rng(self._ens_seed(self.tick_id, 0)))
 
         risk = composite_risk(y)
         u, v = x[:, FEATURES.index("wind_u")], x[:, FEATURES.index("wind_v")]
@@ -187,7 +205,7 @@ class NowcastEngine:
         storms = self.tracker.update(detect_storms(g, risk, y, u, v))
         self.twins.update(storms, g, u, v, sim_min)                      # digital twins: track, stage, projected path
         etas = compute_etas(storms, region.places)
-        ens_stats0 = ensemble_stats(g, y, y, ens0, u, v, 0, self.tick_id * 1000)
+        ens_stats0 = ensemble_stats(g, y, y, ens0, u, v, 0, self._ens_seed(self.tick_id, 0))
         for st_ in storms:
             pk = st_["peak_idx"]
             st_["lo"], st_["hi"] = float(ens_stats0.lo[pk]), float(ens_stats0.hi[pk])
@@ -231,7 +249,7 @@ class NowcastEngine:
             out = st.ens_stats0
         else:
             y, _ = self._forecast(st, horizon)
-            out = ensemble_stats(st.region.grid, y, st.targets, st.ens0, st.u, st.v, horizon, st.tick * 1000 + horizon)
+            out = ensemble_stats(st.region.grid, y, st.targets, st.ens0, st.u, st.v, horizon, self._ens_seed(st.tick, horizon))
         self._ec[key] = out
         return out
 
@@ -257,6 +275,8 @@ class NowcastEngine:
             "tick": st.tick,
             "region_id": st.region.id,
             "region_name": st.region.name,
+            "paused": self.paused,
+            "calm": self.s.calm,
             "sim_time": st.sim_time.isoformat(),
             "horizon": horizon,
             "model": {"name": self.model.name, "version": self.model.version},
@@ -312,7 +332,7 @@ class NowcastEngine:
         assert st is not None
         r, g = st.region, st.region.grid
         return {
-            "bbox": list(r.bbox), "region_id": r.id, "region_name": r.name,
+            "bbox": list(r.bbox), "region_id": r.id, "region_name": r.name, "calm": s.calm,
             "h3_res": s.h3_res, "chunk_res": s.chunk_res, "n_cells": g.n,
             "n_chunks": len(g.chunks), "cell_spacing_deg": g.spacing_deg, "features": FEATURES,
             "targets": TARGETS, "places": r.places, "horizons": HORIZONS_MIN,
@@ -411,5 +431,5 @@ class NowcastEngine:
     async def run(self) -> None:
         while True:
             await asyncio.sleep(self.s.tick_seconds)
-            await asyncio.to_thread(self.compute_tick)
-            self.broadcast()
+            if await asyncio.to_thread(self.step_if_running):
+                self.broadcast()

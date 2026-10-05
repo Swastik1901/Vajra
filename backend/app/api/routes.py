@@ -32,6 +32,23 @@ def grid(request: Request):
     return _engine(request).grid_geojson
 
 
+@router.post("/pause")
+def pause(request: Request):
+    """Freeze the simulation (good for explaining one screen). The lead-time slider keeps working."""
+    e = _engine(request)
+    e.set_paused(True)
+    e.broadcast()
+    return {"paused": True}
+
+
+@router.post("/resume")
+def resume(request: Request):
+    e = _engine(request)
+    e.set_paused(False)
+    e.broadcast()
+    return {"paused": False}
+
+
 @router.get("/sensors")
 def sensors(request: Request):
     """Health of each observation source and a summary of how the fused inputs were obtained."""

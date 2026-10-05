@@ -42,8 +42,10 @@ class Storm:
 
 
 class StormSimulator:
-    def __init__(self, bbox: tuple[float, float, float, float], seed: int = 42, target_storms: int = 6):
+    def __init__(self, bbox: tuple[float, float, float, float], seed: int = 42, target_storms: int = 6,
+                 noise_scale: float = 1.0):
         self.bbox = bbox
+        self.ns = noise_scale      # 1 = normal; ~0.1 = calm demo (storms still move, numbers stop jittering)
         self.rng = np.random.default_rng(seed)
         self.cx = (bbox[0] + bbox[2]) / 2
         self.cy = (bbox[1] + bbox[3]) / 2
@@ -117,19 +119,19 @@ class StormSimulator:
             out_u += mag * dx / r
             out_v += mag * dy / r
 
-        dbz = np.clip(dbz + rng.normal(0, 1.0, n), 0, 70)
+        dbz = np.clip(dbz + rng.normal(0, 1.0 * self.ns, n), 0, 70)
         u0, v0 = self.steering(lat, lon, self.t_min)
         vil = np.clip((dbz - 20) * 1.15, 0, None)
         lam = np.where(dbz > 35, 0.25 * np.clip(dbz - 35, 0, None) ** 1.3, 0.02)
         raw = {
             "dbz": dbz,
             "vil": vil,
-            "cth_k": np.clip(288 - 1.7 * np.clip(dbz - 10, 0, None) - 6 * conv + rng.normal(0, 1.5, n), 190, 300),
-            "cooling_k15": cool + rng.normal(0, 0.3, n),
-            "cape": np.clip(600 + 2600 * conv + rng.normal(0, 80, n), 0, None),
-            "wind_u": u0 + out_u + rng.normal(0, 0.3, n),
-            "wind_v": v0 + out_v + rng.normal(0, 0.3, n),
-            "lightning": rng.poisson(lam).astype(float),
-            "humidity": np.clip(55 + 35 * conv + rng.normal(0, 2, n), 10, 100),
+            "cth_k": np.clip(288 - 1.7 * np.clip(dbz - 10, 0, None) - 6 * conv + rng.normal(0, 1.5 * self.ns, n), 190, 300),
+            "cooling_k15": cool + rng.normal(0, 0.3 * self.ns, n),
+            "cape": np.clip(600 + 2600 * conv + rng.normal(0, 80 * self.ns, n), 0, None),
+            "wind_u": u0 + out_u + rng.normal(0, 0.3 * self.ns, n),
+            "wind_v": v0 + out_v + rng.normal(0, 0.3 * self.ns, n),
+            "lightning": (rng.poisson(lam) if self.ns >= 0.5 else np.round(lam)).astype(float),
+            "humidity": np.clip(55 + 35 * conv + rng.normal(0, 2 * self.ns, n), 10, 100),
         }
         return {k: raw[k] for k in FEATURES}

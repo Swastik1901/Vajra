@@ -70,14 +70,15 @@ class FusionEngine:
         self.last_obs = np.where(valid, out, self.last_obs)
         self.last_rel = np.where(valid, rel, self.last_rel)   # held values inherit the quality of their source frame
         age = self.age.astype(np.float64)
+        eff = np.maximum(age - (_CAD - 1), 0.0)     # staleness beyond the source's normal reporting interval
         with np.errstate(invalid="ignore"):
-            decayed = np.where(~np.isnan(self.last_obs), _BG + (self.last_obs - _BG) * np.exp(-age / _TAU), np.nan)
+            # a value inside its normal interval does not decay; only genuinely stale values drift to climatology
+            decayed = np.where(~np.isnan(self.last_obs), _BG + (self.last_obs - _BG) * np.exp(-eff / _TAU), np.nan)
 
             # 2) short gaps: persistence
             missing = ~valid
             # a value held within its source's normal reporting interval is still the latest observation
             short = missing & (age <= np.maximum(3.0, _CAD - 1)) & ~np.isnan(decayed)
-            eff = np.maximum(age - (_CAD - 1), 0.0)          # staleness beyond the normal cadence
             out[short] = decayed[short]
             prov[short] = np.where(eff == 0, 0, 2)[short]
             rel[short] = (self.last_rel * np.where(eff == 0, 0.98, 0.7 * np.exp(-eff / 6.0)))[short]

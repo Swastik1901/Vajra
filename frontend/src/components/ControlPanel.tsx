@@ -1,4 +1,5 @@
 "use client";
+import { getJson } from "@/lib/api";
 import { METRICS, fmtMinutes } from "@/lib/metrics";
 import type { AppConfig, ColorMode, Frame, LayerToggles, MetricKey } from "@/lib/types";
 import type { StreamStatus } from "@/hooks/useNowcastStream";
@@ -42,6 +43,7 @@ function StrategyBar({ frame }: { frame: Frame }) {
 
 export default function ControlPanel(p: Props) {
   const { config, frame, status } = p;
+  const togglePause = () => getJson(frame?.paused ? "/api/resume" : "/api/pause", { method: "POST" }).catch(() => {});
   const dot = status === "live" ? "bg-emerald-400" : status === "connecting" ? "bg-amber-400" : "bg-red-500";
   return (
     <div className="rounded-xl bg-slate-900/85 backdrop-blur border border-white/10 p-4 w-72 text-sm space-y-4 max-h-[calc(100vh-1.5rem)] overflow-auto">
@@ -51,8 +53,17 @@ export default function ControlPanel(p: Props) {
           <h1 className="font-medium text-slate-100">Storm nowcast, 0–6 h</h1>
         </div>
         <div className="mt-1 text-[11px] text-slate-400">
-          {status === "live" && frame ? `Live · ${new Date(frame.sim_time).toUTCString().slice(17, 25)} UTC (simulated)` :
+          {status === "live" && frame ? `Live · ${new Date(frame.sim_time).toUTCString().slice(17, 25)} UTC (simulated clock)` :
             status === "connecting" ? "Connecting to the API…" : "Disconnected. Retrying…"}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]">
+          <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-200">Live demo</span>
+          {config.calm && <span className="rounded-full bg-sky-500/20 px-2 py-0.5 text-sky-200">Calm demo</span>}
+          {frame?.paused && <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-red-200">Paused</span>}
+          <button onClick={togglePause}
+            className="rounded-full border border-white/15 px-2.5 py-0.5 text-slate-200 hover:bg-white/10 focus:outline-none focus-visible:ring-2 ring-orange-400">
+            {frame?.paused ? "Resume" : "Pause"}
+          </button>
         </div>
       </div>
 

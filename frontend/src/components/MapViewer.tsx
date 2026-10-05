@@ -5,7 +5,7 @@ import {
   DeckGL, PathLayer, PolygonLayer, HeatmapLayer, IconLayer, LineLayer, ScatterplotLayer, TextLayer, TripsLayer, FlyToInterpolator,
 } from "deck.gl";
 import { HEAT_RANGE, riskColor, zoneColor } from "@/lib/colors";
-import { bearingDeg, isHazardMetric, metricValue, METRICS, targetIndex } from "@/lib/metrics";
+import { isHazardMetric, metricValue, METRICS, targetIndex } from "@/lib/metrics";
 import { TRAIL_TIMESTAMPS, useWindParticles, type Trail } from "@/hooks/useWindParticles";
 import type { AppConfig, ColorMode, JoinedCell, LayerToggles, MetricKey, Storm, ViewTarget } from "@/lib/types";
 
@@ -56,14 +56,16 @@ export default function MapViewer(p: Props) {
     () => storms.flatMap((s) => (s.twin?.track_future ?? []).filter((q) => q.m > 0).map((q) => ({ ...q, risk: s.risk, id: s.id }))),
     [storms]);
   const hourMarks = useMemo(() => rings.filter((q) => [60, 120, 240, 360].includes(q.m)), [rings]);
-  const hot = useMemo(() => cells.filter((c) => c.r >= 0.3), [cells]);
 
-  const drift = (c: JoinedCell): [number, number] => {
-    const dt = horizon * 60;
-    return [
-      c.centroid[0] + (c.w[0] * dt) / (111320 * Math.cos((c.centroid[1] * Math.PI) / 180)),
-      c.centroid[1] + (c.w[1] * dt) / 111320,
-    ];
+  // where storm `s` will be `minutes` from now, read off its projected track
+  const stormAt = (s: Storm, minutes: number): [number, number] => {
+    const f = s.twin?.track_future ?? [];
+    if (f.length < 2) return [s.lon, s.lat];
+    let i = 1;
+    while (i < f.length - 1 && f[i].m < minutes) i++;
+    const a = f[i - 1], b = f[i];
+    const t = b.m === a.m ? 0 : Math.max(0, Math.min(1, (minutes - a.m) / (b.m - a.m)));
+    return [a.lon + (b.lon - a.lon) * t, a.lat + (b.lat - a.lat) * t];
   };
 
   const layerList = [
@@ -88,15 +90,15 @@ export default function MapViewer(p: Props) {
       currentTime: TRAIL_TIMESTAMPS.length - 1, trailLength: TRAIL_TIMESTAMPS.length - 1, fadeTrail: true,
       widthMinPixels: 1.6, capRounded: true, jointRounded: true, opacity: 0.8,
     }),
-    layers.arrows && horizon > 0 && new LineLayer<JoinedCell>({
-      id: "drift", data: hot.filter((c) => c.r >= 0.5), getSourcePosition: (c) => c.centroid,
-      getTargetPosition: drift, getColor: [255, 255, 255, 150], getWidth: 1.5, widthUnits: "pixels",
+    layers.arrows && horizon > 0 && new LineLayer<Storm>({
+      id: "drift", data: storms, getSourcePosition: (s) => [s.lon, s.lat],
+      getTargetPosition: (s) => stormAt(s, horizon), getColor: [255, 255, 255, 190], getWidth: 2, widthUnits: "pixels",
       updateTriggers: { getTargetPosition: [horizon, tick] },
     }),
-    layers.arrows && new IconLayer<JoinedCell>({
-      id: "arrows", data: hot, getPosition: (c) => c.centroid, getIcon: () => ARROW_ICON,
-      getAngle: (c) => -bearingDeg(c.w[0], c.w[1]), getSize: (c) => 14 + 24 * c.r, sizeUnits: "pixels",
-      getColor: [255, 255, 255, 215], updateTriggers: { getAngle: [tick], getSize: [tick] },
+    layers.arrows && new IconLayer<Storm>({
+      id: "arrows", data: storms, getPosition: (s) => [s.lon, s.lat], getIcon: () => ARROW_ICON,
+      getAngle: (s) => -s.bearing_deg, getSize: 30, sizeUnits: "pixels", getPixelOffset: [0, 0],
+      getColor: [255, 255, 255, 235], updateTriggers: { getAngle: [tick] },
     }),
     layers.tracks && new ScatterplotLayer<(typeof rings)[number]>({
       id: "track-cone", data: rings, getPosition: (d) => [d.lon, d.lat], getRadius: (d) => d.radius_km * 1000,

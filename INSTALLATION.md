@@ -81,13 +81,16 @@ The simulation runs about 1 simulated minute per real second, so storms visibly 
 | `TICK_SECONDS` | `2.0` | Real seconds between frames |
 | `SIM_MINUTES_PER_TICK` | `2.0` | Simulated minutes advanced per frame |
 | `MODEL_PATH` | unset | Path to a `.onnx` or TorchScript `.pt` file. Unset means the mock model. |
+| `CALM` | `0` | `1` = calm demo: 6 s frames, 1 simulated minute per frame, ~12% of the random noise, fixed ensemble seed, no random sensor faults |
 | `FAULT_RATE` | `0.006` | Chance per sensor source per tick of a random fault (outage, blind spot, noise). `0` disables random faults. |
 | `N_MEMBERS` | `12` | Ensemble size for confidence ranges |
 | `EXPLAIN_LAG_TICKS` | `5` | Window for the "why did risk change" comparison |
 | `CORS_ORIGINS` | `http://localhost:3000,...` | Allowed browser origins |
 | `SEED` | `42` | Simulator seed |
 
-Example: `H3_RES=7 uvicorn main:app --port 8000`. Frames get about 7 times larger, so use res 7 on a smaller `BBOX`.
+Example: `H3_RES=7 uvicorn main:app --port 8000`.
+
+**Calm demo** (steady numbers for presentations): `CALM=1 uvicorn main:app --port 8000` on Mac/Linux, or `$env:CALM="1"; uvicorn main:app --port 8000` in PowerShell. The **Pause** button in the left panel freezes the simulation; the lead-time slider still works while paused. Every number and colour on screen is explained in `DASHBOARD_GUIDE.md`. Frames get about 7 times larger, so use res 7 on a smaller `BBOX`.
 
 ## 6. Troubleshooting
 

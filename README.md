@@ -2,7 +2,7 @@
 
 End-to-end system: streaming environmental data → H3 spatial tiling → modular ML inference → WebSocket/REST → interactive deck.gl map with risk zones and wind-driven drift.
 
-See **INSTALLATION.md** for setup. Short version: `uvicorn main:app --port 8000` in `backend/`, `npm install && npm run dev` in `frontend/`.
+See **INSTALLATION.md** for setup and **DASHBOARD_GUIDE.md** for what every number, feature and colour on the screen means. Short version: `uvicorn main:app --port 8000` in `backend/`, `npm install && npm run dev` in `frontend/`.
 
 ## Data Flow
 
@@ -85,6 +85,13 @@ Frame cell format (index-aligned with `/api/grid`): `r` risk, `t` `[lightning, h
 | 5 | **Confidence-aware predictions** | `services/ensemble.py` | Every cell has risk, a 10th-90th percentile range, a confidence level and the chance of a Warning zone or worse. Unreliable inputs and longer lead times widen the range. Map can be coloured by **Uncertainty** or **Data quality**. | A 12-member perturbation ensemble with engineered spreads. It is not calibrated against observed outcomes. |
 
 Try it: open **Sensor reliability** (bottom right), press *Radar outage*, and watch data quality drop, the input mix switch to proxy or last-value fills, and the confidence ranges widen. *Clear faults* restores it. Random faults also start by themselves at `FAULT_RATE` per source per tick (default 0.006; set 0 to disable).
+
+## Demo controls: calm mode and pause
+
+* `CALM=1` slows and steadies the simulation for presentations: 6 s frames, 1 simulated minute per frame, about 12 % of the per-frame noise, one fixed ensemble seed, no random sensor faults. Storms still move.
+* **Pause / Resume** (left panel, `POST /api/pause` and `/api/resume`) freezes the state. The lead-time slider keeps working on the frozen state, and ETA clocks stop.
+* The panel shows a **Simulated data** chip at all times so nobody mistakes the demo for a live weather feed.
+* Storm arrows: one arrow per storm (direction of travel), plus a line to the storm's projected position when the slider is past "Now".
 
 ## Any region: click the map, or use your location
 

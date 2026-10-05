@@ -19,7 +19,7 @@ export default function ETACountdown({ frame, config }: { frame: Frame; config: 
     const t = setInterval(() => setNow(performance.now()), 500);
     return () => clearInterval(t);
   }, []);
-  const elapsed = (now - (frame.receivedAt ?? now)) / 1000;
+  const elapsed = frame.paused ? 0 : (now - (frame.receivedAt ?? now)) / 1000;   // clocks freeze while paused
 
   return (
     <div className="rounded-xl bg-slate-900/85 backdrop-blur border border-white/10 p-3 w-72 text-sm">
