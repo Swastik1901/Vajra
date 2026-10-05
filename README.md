@@ -2,7 +2,7 @@
 
 End-to-end system: streaming environmental data → H3 spatial tiling → modular ML inference → WebSocket/REST → interactive deck.gl map with risk zones and wind-driven drift.
 
-See **INSTALLATION.md** for setup and **DASHBOARD_GUIDE.md** for what every number, feature and colour on the screen means. Short version: `uvicorn main:app --port 8000` in `backend/`, `npm install && npm run dev` in `frontend/`.
+See **INSTALLATION.md** for setup. Short version: `uvicorn main:app --port 8000` in `backend/`, `npm install && npm run dev` in `frontend/`.
 
 ## Data Flow
 
